@@ -1,43 +1,43 @@
-#!/usr/bin/racket
-#lang racket
+#!/usr/bin/env racket
+#lang racket/base
 
-(require "epub-files.rkt")
-(require file/zip)
+(require racket/cmdline racket/path racket/system "epub.rkt")
+
+(define (html-file? f)
+  (member (filename-extension f) '(#"html" #"xhtml")))
+
+(define (file->lines f)
+  (for/list ([l (in-lines (open-input-file f))]) l))
 
 (define lang "en")
+(define keep #f)
+(define author (getenv "USER"))
+(define spine-files #f)
 (define output-file #f)
 
-(define-values (title author spine-files files)
+(define-values (title files)
   (command-line
    #:once-each
-   [("-l") l "language" (set! lang l)]
    [("-o") o "output epub file" (set! output-file o)]
-   [("-v") "verbose" (zip-verbose #t)]
-   #:args (title author file-list spine-file-list)
-   (values
-    title
-    author
-    (for/list ([l (in-lines (open-input-file spine-file-list))]) l)
-    (for/list ([l (in-lines (open-input-file file-list))]) l))))
+   [("-k") k "keep all generated epub files" (set! keep #t)]
+   [("-a") a "author" (set! author a)]
+   [("-l") l "language" (set! lang l)]
+   [("-s") s "spine file" (set! spine-files (file->lines s))]
+   #:args
+   (title . files) (values title files)))
 
 
-(with-output-to-file "mimetype"
-  (λ () (display "application/epub+zip"))
-  #:exists 'truncate)
+(current-directory output-dir)
 
-(make-container)
+(unless spine-files
+  (set! spine-files (filter html-file? files)))
 
-(make-nav-doc spine-files)
+(make-epub-files files spine-files title author lang)
 
-(make-package-doc files spine-files title author lang)
+(when output-file
+  (system (string-append "zip -X -Z store " output-file " mimetype"))
+  (system (apply string-append "zip -X -r " output-file " META-INF content.opf nav.xhtml " files)))
 
-#;(and output-file
-     (begin
-       (and (file-exists? output-file)
-            (delete-file output-file))
-       (apply zip output-file
-              "mimetype"
-              "META-INF"
-              "content.opf"
-              files)))
-;    #:path-prefix #t))
+(unless keep
+  (map delete-file '("mimetype" "META-INF/container.xml" "content.opf" "nav.xhtml"))
+  (delete-directory "META-INF"))

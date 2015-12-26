@@ -1,65 +1,57 @@
 #lang at-exp racket/base
 
-(provide make-container make-package-doc make-nav-doc)
+(provide make-epub-files)
 
-(require racket/path)
-(require scribble/text)
-(require libuuid)
-
-;(write "application/epub+zip" (open-output-file "./mimetype")
+(require racket/path
+         racket/port
+         racket/system
+         scribble/text)
 
 (define (map/lines f l)
   (add-newlines (map f l)))
 
+(define ($ cmd) (string-trim (with-output-to-string (lambda () (system cmd)))))
+
+(define (mimetype file)
+  (case (filename-extension file)
+    [(#"xhtml" #"html") "application/xhtml+xml"]
+    [(#"jpeg" #"jpg") "image/jpeg"]
+    [(#"png") "image/png"]
+    [(#"css") "text/css"]
+    [(#"svg") "image/svg+xml"]
+    [(#"pls") "application/pls+xml"]))
+      
+(define (file->id file)
+  (let* ([id (string-replace file "/" "")]
+         [id (string-replace id "." "")])
+    id))
+
 ;; http://www.idpf.org/epub/301/spec/epub-ocf.html#sec-container-metainf-container.xml
 (define (container . rootfiles)
-   @`{<?xml version="1.0"?>
+   @`{<?xml version="1.0" encoding="UTF-8"?>
       <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
         <rootfiles>
           @,(map/lines (λ (rf) @`{<rootfile full-path="@,rf" media-type="application/oebps-package+xml" />}) rootfiles)
         </rootfiles>
       </container>})
 
-(define (file->id file)
-  (let* ([id (string-replace file "/" "")]
-         [id (string-replace id "." "")])
-    id))
-
 ;; http://www.idpf.org/epub/301/spec/epub-publications.html#sec-package-documents
 ;; http://www.idpf.org/epub/301/schema/package-30.rnc
 (define (package-doc files spine-files title author lang)
 
-  (define (now)
-    (let* ([d (seconds->date (current-seconds))]
-           [year (date-year d)]
-           [month (date-month d)]
-           [day (date-day d)]
-           [day (date-day d)])
-      (format "~a-~a-~a" year month day)))
-
-  
   (define (metadata title author lang)
     @`{<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-         <dc:identifier id="pub-id">@,(uuid-generate)</dc:identifier>
+         <dc:identifier id="pub-id">@,${uuidgen}</dc:identifier>
          <dc:title>@|,title|</dc:title>
          <dc:language>@|,lang|</dc:language>
-         <dc:date>@,(now)</dc:date>
-         <meta property="dcterms:modified">@,(now)T12:00:00Z</meta> @;CCYY-MM-DDThh:mm:ssZ
+         <dc:date>@,${date --utc -I}</dc:date>
+         <meta property="dcterms:modified">@,${date --utc -Iseconds}</meta>
          <dc:creator id="creator">@|,author|</dc:creator>
          <meta refines="#creator" property="role" scheme="marc:relators">aut</meta>
        </metadata>})
 
   (define (manifest files)    
     (define (item file)
-      (define (mimetype file)
-        (case (filename-extension file)
-          [(#"xhtml" #"html") "application/xhtml+xml"]
-          [(#"jpeg" #"jpg") "image/jpeg"]
-          [(#"png") "image/png"]
-          [(#"css") "text/css"]
-          [(#"svg") "image/svg+xml"]
-          [(#"pls") "application/pls+xml"]))
-      
       @`{<item id="@,(file->id file)" href="@,file" media-type="@,(mimetype file)" />})
 
     @`{<manifest>
@@ -75,7 +67,7 @@
          @,(map/lines itemref spine-files)
        </spine>})
   
-  @`{<?xml version="1.0"?>
+  @`{<?xml version="1.0" encoding="UTF-8"?>
      <package version="3.0" xml:lang="en" xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id">
        @,(metadata title author lang)
        @,(manifest files)
@@ -100,6 +92,12 @@
      </html>})
 
 
+
+(define (make-mimetype)
+  (with-output-to-file "mimetype"
+    (λ () (display "application/epub+zip"))
+    #:exists 'truncate))
+
 (define (make-container)
   (unless (directory-exists? "META-INF")
     (make-directory "META-INF"))
@@ -116,3 +114,10 @@
   (with-output-to-file "./nav.xhtml"
     (λ () (output (nav-doc spine-files)))
     #:exists 'truncate))
+
+
+(define (make-epub-files files spine-files title author lang)
+  (make-mimetype)
+  (make-container)
+  (make-nav-doc spine-files)
+  (make-package-doc files spine-files title author lang))
